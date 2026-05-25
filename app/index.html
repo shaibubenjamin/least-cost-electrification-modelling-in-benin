@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Benin Electrification Explorer | OnSSET 2026–2041</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    :root {
+      --primary:  #1a3a5c;
+      --accent:   #e8a020;
+      --bg:       #f0f3f7;
+      --panel:    #ffffff;
+      --border:   #d4dae4;
+      --text:     #18212e;
+      --muted:    #64748b;
+      --grid:     #1d6bb8;
+      --mgpv:     #1e8a44;
+      --sapv:     #e06c1a;
+      --changed:  #cc2200;
+      --unch:     #9eaab8;
+    }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    html,body { height:100%; font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); font-size:13px; }
+
+    /* ═══════════════════ LAYOUT ═══════════════════ */
+    #app { display:flex; flex-direction:column; height:100vh; }
+
+    /* ── Top bar ── */
+    #topbar {
+      background:var(--primary); color:#fff;
+      padding:0 20px; height:44px;
+      display:flex; align-items:center; justify-content:space-between;
+      flex-shrink:0; box-shadow:0 2px 8px rgba(0,0,0,.3); z-index:1100;
+    }
+    .brand { display:flex; align-items:center; gap:10px; }
+    .brand-title { font-size:.97rem; font-weight:700; }
+    .brand-sub   { font-size:.68rem; opacity:.62; margin-top:1px; }
+    .topbar-pills { display:flex; gap:8px; align-items:center; }
+    .pill { background:rgba(255,255,255,.14); border-radius:20px; padding:2px 10px; font-size:.7rem; font-weight:600; }
+
+    /* ── KPI strip (Z-top row) ── */
+    #kpi-strip {
+      background:var(--panel); border-bottom:1px solid var(--border);
+      padding:8px 16px; display:flex; align-items:center; gap:10px;
+      flex-shrink:0; z-index:1050;
+    }
+    .kpi-card {
+      background:var(--bg); border:1px solid var(--border); border-radius:9px;
+      padding:9px 16px; min-width:120px;
+    }
+    .kpi-lbl { font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+    .kpi-val { font-size:1.48rem; font-weight:700; color:var(--text); line-height:1.1; margin-top:2px; }
+    .kpi-sub { font-size:.76rem; color:var(--muted); margin-top:1px; }
+    .kpi-sep { width:1px; background:var(--border); align-self:stretch; margin:0 4px; flex-shrink:0; }
+
+    /* Scenario tabs in KPI strip (Z-top right) */
+    .scene-tabs { display:flex; gap:5px; margin-left:auto; }
+    .tab-btn {
+      padding:6px 14px; border:1.5px solid var(--border); border-radius:7px;
+      background:transparent; color:var(--muted); font-size:.78rem; font-weight:600;
+      cursor:pointer; transition:all .15s;
+    }
+    .tab-btn.active { border-color:var(--primary); background:var(--primary); color:#fff; }
+    .tab-btn:hover:not(.active) { background:#eef2f8; }
+
+    /* ── Body: sidebar + map ── */
+    #body { display:flex; flex:1; overflow:hidden; }
+
+    /* ── Sidebar (Z-bottom-left) ── */
+    #sidebar {
+      width:290px; min-width:240px;
+      background:var(--panel); border-right:1px solid var(--border);
+      display:flex; flex-direction:column; overflow-y:auto; flex-shrink:0;
+    }
+    .sec { padding:12px 14px; border-bottom:1px solid var(--border); }
+    .sec-hd { font-size:.61rem; font-weight:700; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin-bottom:9px; }
+
+    /* Tech mix bars */
+    .tb-list { display:flex; flex-direction:column; gap:5px; }
+    .tb-row  { display:flex; align-items:center; gap:6px; }
+    .tb-sw   { width:8px; height:8px; border-radius:2px; flex-shrink:0; }
+    .tb-lbl  { flex:1; font-size:.78rem; }
+    .tb-trk  { flex:2; height:5px; background:#e0e4eb; border-radius:3px; overflow:hidden; }
+    .tb-fill { height:100%; border-radius:3px; transition:width .4s; }
+    .tb-pct  { font-size:.7rem; color:var(--muted); width:34px; text-align:right; }
+    .tb-cnt  { font-size:.7rem; color:var(--muted); width:48px; text-align:right; }
+
+    /* Filter */
+    select.fsel {
+      width:100%; padding:5px 8px; border:1.5px solid var(--border);
+      border-radius:7px; font-size:.78rem; color:var(--text);
+      background:#fff; cursor:pointer; outline:none; margin-top:4px;
+    }
+    select.fsel:focus { border-color:var(--primary); }
+
+    /* Layer toggles */
+    .lyr-list { display:flex; flex-direction:column; gap:7px; }
+    .lyr-row  { display:flex; align-items:center; justify-content:space-between; }
+    .lyr-lbl  { display:flex; align-items:center; gap:7px; font-size:.79rem; }
+    .sw { position:relative; width:32px; height:17px; }
+    .sw input { opacity:0; width:0; height:0; }
+    .sw-sl {
+      position:absolute; inset:0; background:#c0c9d4;
+      border-radius:17px; cursor:pointer; transition:background .2s;
+    }
+    .sw-sl::before {
+      content:''; position:absolute; width:11px; height:11px;
+      left:3px; top:3px; background:#fff; border-radius:50%; transition:transform .2s;
+    }
+    .sw input:checked + .sw-sl { background:#2461a0; }
+    .sw input:checked + .sw-sl::before { transform:translateX(15px); }
+
+    /* Department table */
+    .dept-tbl { width:100%; border-collapse:collapse; font-size:.74rem; }
+    .dept-tbl th { background:var(--bg); padding:4px 6px; text-align:left;
+                   font-weight:700; font-size:.6rem; text-transform:uppercase;
+                   letter-spacing:.05em; color:var(--muted); border-bottom:1px solid var(--border); }
+    .dept-tbl td { padding:4px 6px; border-bottom:1px solid #f0f3f8; }
+    .dept-tbl tr:hover td { background:#f5f8fc; cursor:pointer; }
+    .mini-bar { display:inline-block; height:4px; background:var(--changed); border-radius:2px; vertical-align:middle; }
+
+    /* Figures */
+    .fig-scroll { display:flex; gap:7px; overflow-x:auto; padding-bottom:4px; }
+    .fig-card {
+      flex-shrink:0; width:126px; border-radius:7px;
+      border:1.5px solid var(--border); overflow:hidden; cursor:pointer;
+      transition:border-color .15s, box-shadow .15s;
+    }
+    .fig-card:hover { border-color:var(--primary); box-shadow:0 2px 8px rgba(26,58,92,.12); }
+    .fig-card img { width:100%; display:block; }
+    .fig-card p { font-size:.67rem; padding:3px 5px; color:var(--muted); text-align:center; }
+
+    /* ── Map panel (Z-bottom-right) ── */
+    #map-panel { flex:1; display:flex; flex-direction:column; position:relative; overflow:hidden; }
+    #map-toolbar {
+      background:var(--panel); border-bottom:1px solid var(--border);
+      padding:5px 14px; display:flex; align-items:center; gap:12px;
+      font-size:.76rem; flex-shrink:0;
+    }
+    #map-label { font-weight:600; }
+    #map-meta  { color:var(--muted); margin-left:auto; font-size:.72rem; }
+    #map { flex:1; }
+
+    /* Map controls */
+    .north-arrow {
+      background:rgba(255,255,255,.92); border-radius:6px;
+      padding:5px 8px; box-shadow:0 1px 6px rgba(0,0,0,.15);
+      text-align:center; user-select:none;
+    }
+    .map-legend {
+      background:rgba(255,255,255,.95); border-radius:8px;
+      padding:9px 12px; box-shadow:0 2px 10px rgba(0,0,0,.13);
+      font-size:.74rem; min-width:150px;
+    }
+    .map-legend strong { font-size:.61rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); display:block; margin-bottom:4px; }
+    .leg-row { display:flex; align-items:center; gap:5px; margin-bottom:3px; line-height:1.4; }
+    .leg-sw  { width:10px; height:10px; border-radius:2px; flex-shrink:0; }
+    .leg-line-s { width:16px; height:0; border-top:2px solid; flex-shrink:0; }
+    .leg-sep { border-top:1px solid #e0e4eb; margin:4px 0; }
+    .coord-pill {
+      background:rgba(255,255,255,.92); border-radius:5px;
+      padding:3px 8px; font-size:.69rem; font-family:monospace; color:var(--text);
+      box-shadow:0 1px 4px rgba(0,0,0,.12);
+    }
+
+    /* Progress bar for loading */
+    #load-bar {
+      position:absolute; top:0; left:0; right:0; height:3px;
+      background:var(--accent); transform:scaleX(0); transform-origin:left;
+      transition:transform .3s; z-index:2000; display:none;
+    }
+    #load-bar.show { display:block; }
+
+    /* Loader overlay */
+    #map-loader {
+      display:none; position:absolute; bottom:50px; left:50%;
+      transform:translateX(-50%);
+      background:rgba(26,58,92,.85); color:#fff;
+      border-radius:8px; padding:10px 18px;
+      font-size:.8rem; z-index:2001;
+      align-items:center; gap:9px;
+      box-shadow:0 4px 16px rgba(0,0,0,.25);
+    }
+    #map-loader.show { display:flex; }
+    .spinner {
+      width:16px; height:16px;
+      border:2px solid rgba(255,255,255,.3); border-top-color:#fff;
+      border-radius:50%; animation:spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    /* Lightbox */
+    #lightbox { display:none; position:fixed; inset:0; background:rgba(0,0,0,.83); z-index:9000; align-items:center; justify-content:center; }
+    #lightbox.open { display:flex; }
+    #lightbox img { max-width:94vw; max-height:92vh; border-radius:8px; box-shadow:0 8px 40px rgba(0,0,0,.5); }
+    #lb-close { position:absolute; top:14px; right:22px; color:#fff; font-size:1.8rem; cursor:pointer; opacity:.8; line-height:1; }
+    #lb-close:hover { opacity:1; }
+
+    #sidebar::-webkit-scrollbar { width:3px; }
+    #sidebar::-webkit-scrollbar-thumb { background:#c4cdd8; border-radius:2px; }
+    .leaflet-tooltip { font-size:.77rem !important; border-radius:5px !important; }
+
+    /* Filter active indicator */
+    .filter-active-badge {
+      display:inline-block; background:var(--primary); color:#fff;
+      border-radius:10px; padding:1px 7px; font-size:.62rem; font-weight:700;
+      margin-left:6px; vertical-align:middle;
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Top bar -->
+  <header id="topbar">
+    <div class="brand">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="11" fill="rgba(255,255,255,.1)" stroke="rgba(255,255,255,.22)" stroke-width="1.2"/>
+        <circle cx="12" cy="12" r="3" fill="#e8a020"/>
+        <path d="M12 4v4M12 16v4M4 12h4M16 12h4" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+      <div>
+        <div class="brand-title">Benin Electrification Explorer</div>
+        <div class="brand-sub">OnSSET Least-Cost Analysis · 2026–2041</div>
+      </div>
+    </div>
+    <div class="topbar-pills">
+      <span class="pill">17,175 Settlements</span>
+      <span class="pill">Benin · 12 Departments</span>
+    </div>
+  </header>
+
+  <!-- KPI strip — Z top row -->
+  <div id="kpi-strip">
+    <div class="kpi-card" id="kpi-settlements">
+      <div class="kpi-lbl">Settlements</div>
+      <div class="kpi-val" id="kv-n">17,175</div>
+      <div class="kpi-sub" id="ks-n">Benin national</div>
+    </div>
+    <div class="kpi-sep"></div>
+    <div class="kpi-card" id="kpi-investment">
+      <div class="kpi-lbl">Total Investment</div>
+      <div class="kpi-val" id="kv-inv">—</div>
+      <div class="kpi-sub">2026–2041, USD</div>
+    </div>
+    <div class="kpi-sep"></div>
+    <div class="kpi-card" id="kpi-dominant">
+      <div class="kpi-lbl">Dominant Technology</div>
+      <div class="kpi-val" id="kv-dom">—</div>
+      <div class="kpi-sub" id="ks-dom">—</div>
+    </div>
+    <div class="kpi-sep"></div>
+    <div class="kpi-card" id="kpi-changed">
+      <div class="kpi-lbl">Reclassified</div>
+      <div class="kpi-val" id="kv-chg">—</div>
+      <div class="kpi-sub">Baseline vs Extended</div>
+    </div>
+    <div class="kpi-sep"></div>
+    <div class="kpi-card">
+      <div class="kpi-lbl">Scenario Description</div>
+      <div style="font-size:.82rem;color:var(--muted);line-height:1.45;margin-top:3px;max-width:300px;" id="scene-desc">
+        Baseline OnSSET — national MTF Tier 2/3 demand.
+      </div>
+    </div>
+    <!-- Scenario tabs -->
+    <div class="scene-tabs">
+      <button class="tab-btn active" id="btn-vanilla"  onclick="switchScenario('vanilla')">Baseline</button>
+      <button class="tab-btn"        id="btn-extended" onclick="switchScenario('extended')">Extended</button>
+      <button class="tab-btn"        id="btn-delta"    onclick="switchScenario('delta')">Changes</button>
+    </div>
+  </div>
+
+  <!-- Body: sidebar + map -->
+  <div id="body">
+
+    <!-- Sidebar -->
+    <nav id="sidebar">
+
+      <!-- Technology mix -->
+      <div class="sec">
+        <div class="sec-hd">Technology Mix <span id="tech-year" style="font-weight:400;letter-spacing:0;"></span></div>
+        <div class="tb-list" id="tech-list">
+          <div style="color:var(--muted);font-size:.75rem;padding:4px 0;">Loading…</div>
+        </div>
+      </div>
+
+      <!-- Filter by region -->
+      <div class="sec">
+        <div class="sec-hd">Filter by Region <span id="filter-badge" class="filter-active-badge" style="display:none;">Active</span></div>
+        <select class="fsel" id="filter-dept" onchange="applyFilter()">
+          <option value="">All Departments (Benin)</option>
+        </select>
+        <select class="fsel" id="filter-commune" onchange="applyFilter()" style="margin-top:5px; display:none;">
+          <option value="">All Communes</option>
+        </select>
+        <button onclick="clearFilter()" style="margin-top:6px;width:100%;padding:4px;border:1.5px solid var(--border);border-radius:6px;background:transparent;font-size:.74rem;cursor:pointer;color:var(--muted);">Reset filter</button>
+      </div>
+
+      <!-- Map layers -->
+      <div class="sec">
+        <div class="sec-hd">Map Layers</div>
+        <div class="lyr-list">
+          <div class="lyr-row">
+            <div class="lyr-lbl">
+              <svg width="16" height="10"><rect x="1" y="3" width="14" height="4" rx="2" fill="none" stroke="#555" stroke-width="1.5" stroke-dasharray="3 2"/></svg>
+              Settlement Extents
+            </div>
+            <label class="sw"><input type="checkbox" id="lyr-settlements" checked onchange="toggleLayer('settlements')"/><span class="sw-sl"></span></label>
+          </div>
+          <div class="lyr-row">
+            <div class="lyr-lbl">
+              <svg width="16" height="10"><line x1="2" y1="5" x2="14" y2="5" stroke="#1a3a5c" stroke-width="2"/></svg>
+              Dept. Boundaries
+            </div>
+            <label class="sw"><input type="checkbox" id="lyr-boundary" checked onchange="toggleLayer('boundary')"/><span class="sw-sl"></span></label>
+          </div>
+          <div class="lyr-row">
+            <div class="lyr-lbl">
+              <svg width="16" height="10"><line x1="2" y1="5" x2="14" y2="5" stroke="#e8a020" stroke-width="2"/></svg>
+              HV Lines
+            </div>
+            <label class="sw"><input type="checkbox" id="lyr-hvlines" checked onchange="toggleLayer('hvlines')"/><span class="sw-sl"></span></label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Department table -->
+      <div class="sec">
+        <div class="sec-hd">By Department <span style="font-weight:400;">(click to zoom)</span></div>
+        <div id="dept-wrap"><div style="color:var(--muted);font-size:.75rem;padding:4px 0;">Loading…</div></div>
+      </div>
+
+      <!-- Analysis figures -->
+      <div class="sec">
+        <div class="sec-hd">Analysis Figures</div>
+        <div class="fig-scroll">
+          <div class="fig-card" onclick="openFig('/figures/fig1_vanilla_tech_map.png')">
+            <img src="/figures/fig1_vanilla_tech_map.png" loading="lazy"/><p>Baseline map</p>
+          </div>
+          <div class="fig-card" onclick="openFig('/figures/fig2_extended_tech_map.png')">
+            <img src="/figures/fig2_extended_tech_map.png" loading="lazy"/><p>Extended map</p>
+          </div>
+          <div class="fig-card" onclick="openFig('/figures/fig3_delta_map.png')">
+            <img src="/figures/fig3_delta_map.png" loading="lazy"/><p>Changes</p>
+          </div>
+          <div class="fig-card" onclick="openFig('/figures/fig4_tech_mix_bar.png')">
+            <img src="/figures/fig4_tech_mix_bar.png" loading="lazy"/><p>Tech mix</p>
+          </div>
+          <div class="fig-card" onclick="openFig('/figures/fig5_lcoe_histograms.png')">
+            <img src="/figures/fig5_lcoe_histograms.png" loading="lazy"/><p>LCOE</p>
+          </div>
+        </div>
+      </div>
+
+    </nav>
+
+    <!-- Map panel -->
+    <div id="map-panel">
+      <div id="map-toolbar">
+        <span id="map-label">Baseline — settlement technologies, 2026–2041 horizon</span>
+        <span id="map-meta"></span>
+      </div>
+      <div id="map"></div>
+      <div id="load-bar"></div>
+      <div id="map-loader"><div class="spinner"></div><span id="loader-msg">Loading settlement polygons…</span></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Lightbox -->
+<div id="lightbox" onclick="closeLightbox()">
+  <span id="lb-close">&#x2715;</span>
+  <img id="lb-img" src="" alt=""/>
+</div>
+
+<script>
+// ── Colours & styles (only the three technologies present in Benin results) ───
+const TECH_COL = {
+  Grid:  '#1d6bb8',
+  MG_PV: '#1e8a44',
+  SA_PV: '#e06c1a',
+};
+
+const TECH_LABEL_FULL = {
+  Grid:  'National Grid Extension',
+  MG_PV: 'Mini-Grid (Solar PV)',
+  SA_PV: 'Solar Home System (SHS)',
+};
+
+// Distinct border pattern per technology — decode at a glance without tooltip
+const TECH_STYLE = {
+  Grid:  { dashArray: null,  weight: 2.0, fillOpacity: 0.18 },   // solid
+  MG_PV: { dashArray: '6 3', weight: 2.2, fillOpacity: 0.30 },   // long dash
+  SA_PV: { dashArray: '2 5', weight: 1.6, fillOpacity: 0.22 },   // short dot
+};
+
+const CHANGE_COL = '#cc2200';
+const UNCH_COL   = '#9eaab8';
+const HV_COL     = '#e8a020';
+const BDR_COL    = '#1a3a5c';
+
+const SCENE_DESC = {
+  vanilla:  'Baseline OnSSET — national MTF Tier 2/3 demand. Grid distance = min(substation, HV line).',
+  extended: 'Extended model: wealth-disaggregated demand (RWI), site-specific GHI, HV line distances, POI anchor loads.',
+  delta:    'Settlements reclassified between Baseline and Extended. Red = changed technology.',
+};
+const MAP_LABELS = {
+  vanilla:  'Baseline scenario — least-cost technology per settlement (2041)',
+  extended: 'Extended scenario — wealth & GHI disaggregated (2041)',
+  delta:    'Technology change map — settlements that changed technology classification',
+};
+
+let currentScenario   = 'vanilla';
+let statsData         = null;
+let layers            = {};
+let deptBounds        = {};       // normalized name -> Leaflet bounds
+let settlementGeoJSON = null;     // raw GeoJSON for commune population
+let settlementLayer   = null;     // the L.GeoJSON layer (for eachLayer on individual features)
+
+// Normalise dept name: strip diacritics + lower-case for comparison
+function normName(s) {
+  return (s || '').normalize('NFD').replace(/\p{Mn}/gu, '').toLowerCase().trim();
+}
+
+// ── Leaflet map (NO preferCanvas — boundary/HV use SVG, settlements use canvas) ─
+const renderer = L.canvas({ padding: 0.5 });
+const map = L.map('map', { zoomControl: false }).setView([9.3, 2.3], 7);
+L.control.zoom({ position: 'topright' }).addTo(map);
+L.control.scale({ position: 'bottomright', imperial: false, maxWidth: 150 }).addTo(map);
+
+// Esri World Imagery
+L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  { attribution:'&copy; Esri, Maxar, Earthstar Geographics', maxZoom:19 }
+).addTo(map);
+
+// Custom panes so boundary/HV lines always render ABOVE settlement canvas
+map.createPane('hvPane').style.zIndex      = 420;
+map.createPane('boundaryPane').style.zIndex = 450;
+map.createPane('labelPane').style.zIndex    = 460;
+// pointer-events off on boundary pane so clicks pass through to settlements
+map.getPane('boundaryPane').style.pointerEvents = 'none';
+
+layers.settlements = L.layerGroup().addTo(map);
+layers.hvlines     = L.layerGroup().addTo(map);
+layers.boundary    = L.layerGroup().addTo(map);
+
+// ── North arrow ───────────────────────────────────────────────────────────────
+const northCtrl = L.control({ position: 'topright' });
+northCtrl.onAdd = function() {
+  const d = L.DomUtil.create('div', 'north-arrow');
+  d.innerHTML = `<svg width="22" height="36" viewBox="0 0 22 36">
+    <polygon points="11,2 17,20 11,16 5,20" fill="${BDR_COL}"/>
+    <polygon points="11,34 17,16 11,20 5,16" fill="#b0bec8"/>
+    <circle cx="11" cy="18" r="2.2" fill="white" stroke="${BDR_COL}" stroke-width="1"/>
+  </svg><div style="font-size:9px;font-weight:700;color:${BDR_COL}">N</div>`;
+  return d;
+};
+northCtrl.addTo(map);
+
+// ── Coordinate display ────────────────────────────────────────────────────────
+const coordCtrl = L.control({ position: 'bottomleft' });
+coordCtrl.onAdd = function() {
+  const d = L.DomUtil.create('div', 'coord-pill');
+  d.id = 'coord-pill';
+  d.textContent = 'Move cursor over map';
+  return d;
+};
+coordCtrl.addTo(map);
+map.on('mousemove', e => {
+  const el = document.getElementById('coord-pill');
+  if (el) el.textContent = `${e.latlng.lat.toFixed(4)}°N  ${e.latlng.lng.toFixed(4)}°E`;
+});
+
+// ── Legend ────────────────────────────────────────────────────────────────────
+const legCtrl = L.control({ position: 'bottomleft' });
+legCtrl.onAdd = function() {
+  const d = L.DomUtil.create('div', 'map-legend'); d.id = 'leaflet-legend'; return d;
+};
+legCtrl.addTo(map);
+
+function updateLegend(sc) {
+  const el = document.getElementById('leaflet-legend');
+  if (!el) return;
+  if (sc === 'delta') {
+    el.innerHTML = `<strong>Technology Change</strong>
+      <div class="leg-row"><span class="leg-sw" style="background:${CHANGE_COL}"></span>Technology changed</div>
+      <div class="leg-row"><span class="leg-sw" style="background:${UNCH_COL}"></span>Unchanged</div>
+      <div class="leg-sep"></div>
+      <div class="leg-row"><span class="leg-line-s" style="border-color:${HV_COL}"></span>HV Transmission</div>
+      <div class="leg-row"><span class="leg-line-s" style="border-color:${BDR_COL}"></span>Department boundary</div>`;
+  } else {
+    const rows = Object.entries(TECH_LABEL_FULL).map(([k, label]) => {
+      const col = TECH_COL[k];
+      const st  = TECH_STYLE[k];
+      const borderCss = st.dashArray
+        ? `border:2px dashed ${col};`
+        : `border:2px solid ${col};`;
+      return `<div class="leg-row">
+        <span style="display:inline-block;width:22px;height:13px;${borderCss}
+          background:${col}30;border-radius:2px;flex-shrink:0;"></span>
+        <span>${label}</span>
+      </div>`;
+    }).join('');
+    el.innerHTML = `<strong>Least-Cost Technology</strong>${rows}
+      <div class="leg-sep"></div>
+      <div class="leg-row"><span class="leg-line-s" style="border-color:${HV_COL}"></span>HV Transmission</div>
+      <div class="leg-row"><span class="leg-line-s" style="border-color:${BDR_COL}"></span>Department boundary</div>`;
+  }
+}
+
+// ── Static geodata ────────────────────────────────────────────────────────────
+async function loadBoundary() {
+  try {
+    const res = await fetch('/api/geodata/boundary');
+    const gj  = await res.json();
+    L.geoJSON(gj, {
+      pane: 'boundaryPane',
+      style: { color: BDR_COL, weight: 2, opacity: 0.85, fill: false },
+      onEachFeature(feat, lyr) {
+        const name = feat.properties.NAME_1 || '';
+        lyr.bindTooltip(name, { sticky: true, pane: 'labelPane' });
+        // store bounds by normalised name so Ouémé / Oueme both match
+        deptBounds[normName(name)] = lyr.getBounds();
+        // allow click-through (boundaryPane has pointer-events:none) — use separate hover logic
+      }
+    }).addTo(layers.boundary);
+  } catch(e) { console.error('boundary load failed', e); }
+}
+
+async function loadHVLines() {
+  try {
+    const res = await fetch('/api/geodata/transmission');
+    const gj  = await res.json();
+    L.geoJSON(gj, {
+      pane: 'hvPane',
+      style: feat => ({
+        color: HV_COL,
+        weight: (feat.properties.Voltage_KV || 0) >= 225 ? 2.4 : 1.6,
+        opacity: .88,
+        dashArray: feat.properties.Situation === 'Planned' ? '7 5' : null,
+      }),
+      onEachFeature(feat, lyr) {
+        lyr.bindTooltip(`${feat.properties.Voltage_KV || '?'} kV`, { sticky: true });
+      }
+    }).addTo(layers.hvlines);
+  } catch(e) { console.error('hvlines load failed', e); }
+}
+
+// ── Settlement polygon loading ─────────────────────────────────────────────────
+function setLoader(on, msg) {
+  document.getElementById('map-loader').classList.toggle('show', on);
+  if (msg) document.getElementById('loader-msg').textContent = msg;
+  const bar = document.getElementById('load-bar');
+  bar.classList.toggle('show', on);
+  bar.style.transform = on ? 'scaleX(0.85)' : 'scaleX(1)';
+}
+
+async function loadSettlements(scenario) {
+  setLoader(true, `Loading ${scenario === 'delta' ? 'change' : scenario} settlement extents…`);
+  layers.settlements.clearLayers();
+  settlementGeoJSON = null;
+  settlementLayer   = null;
+
+  try {
+    if (scenario === 'delta') {
+      const [deltaRes, geoRes] = await Promise.all([
+        fetch('/api/delta'),
+        fetch('/api/geodata/settlements?scenario=vanilla'),
+      ]);
+      const deltaData  = await deltaRes.json();
+      const gj         = await geoRes.json();
+      settlementGeoJSON = gj;
+      const changedSet = new Set(
+        deltaData.settlements.map(s => `${(+s.X_deg).toFixed(4)},${(+s.Y_deg).toFixed(4)}`)
+      );
+      settlementLayer = L.geoJSON(gj, {
+        renderer,
+        style: feat => {
+          const lon = (feat.properties.lon || 0).toFixed(4);
+          const lat = (feat.properties.lat || 0).toFixed(4);
+          const changed = changedSet.has(`${lon},${lat}`);
+          return {
+            color: changed ? CHANGE_COL : UNCH_COL,
+            weight: 1, opacity: .85,
+            fillColor: changed ? CHANGE_COL : UNCH_COL,
+            fillOpacity: changed ? 0.45 : 0.08,
+            dashArray: '3 3',
+          };
+        },
+        onEachFeature(feat, lyr) {
+          const p = feat.properties;
+          lyr.bindTooltip(`${p.village_name || 'Settlement'} · Pop: ${(p.population || 0).toLocaleString()}`, { sticky: true });
+        }
+      }).addTo(layers.settlements);
+      document.getElementById('map-meta').textContent = `${deltaData.n_changed.toLocaleString()} changed of 17,175`;
+    } else {
+      const res = await fetch(`/api/geodata/settlements?scenario=${scenario}`);
+      const gj  = await res.json();
+      settlementGeoJSON = gj;
+      settlementLayer = L.geoJSON(gj, {
+        renderer,
+        style: feat => {
+          const tech = feat.properties.tech || '';
+          const col  = TECH_COL[tech] || '#777';
+          const st   = TECH_STYLE[tech] || { dashArray: '3 3', weight: 1.5, fillOpacity: 0.15 };
+          return { color: col, weight: st.weight, opacity: .9,
+                   fillColor: col, fillOpacity: st.fillOpacity,
+                   dashArray: st.dashArray };
+        },
+        onEachFeature(feat, lyr) {
+          const p    = feat.properties;
+          const tech = p.tech || '';
+          const col  = TECH_COL[tech] || '#777';
+          const fullName = TECH_LABEL_FULL[tech] || tech;
+          const name = p.village_name || 'Settlement';
+
+          // Hover tooltip — just name + tech badge
+          lyr.bindTooltip(
+            `<b>${name}</b><br><span style="color:${col};font-weight:600">${fullName}</span>`,
+            { sticky: true, maxWidth: 200 }
+          );
+
+          // Click popup — full breakdown card
+          const pop   = p.Pop ? (+p.Pop).toLocaleString() : (p.population ? (+p.population).toLocaleString() : '—');
+          const bldg  = p.num_buildings ? (+p.num_buildings).toLocaleString() : '—';
+          const lcoe  = p.lcoe  ? `$${(+p.lcoe).toFixed(3)}/kWh` : '—';
+          const inv   = p.inv_total && p.inv_total > 0 ? `$${(+p.inv_total).toLocaleString()}` : '—';
+          const conn  = p.new_conn && p.new_conn > 0 ? (+p.new_conn).toLocaleString() + ' HH' : '—';
+          const dept  = p.admin1_name || '—';
+          const comm  = p.admin2_name || '—';
+          const lat   = p.lat  ? (+p.lat).toFixed(4)  : '—';
+          const lon   = p.lon  ? (+p.lon).toFixed(4)  : '—';
+
+          lyr.bindPopup(`
+            <div style="min-width:230px;font-family:'Segoe UI',sans-serif;font-size:13px;">
+              <div style="font-weight:700;font-size:1rem;margin-bottom:6px;color:#18212e;">${name}</div>
+              <div style="display:inline-block;background:${col};color:#fff;border-radius:5px;
+                          padding:3px 10px;font-size:.78rem;font-weight:600;margin-bottom:10px;">
+                ${fullName}
+              </div>
+              <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+                <tr style="border-bottom:1px solid #f0f3f8;">
+                  <td style="color:#64748b;padding:4px 2px;">Department</td>
+                  <td style="font-weight:600;text-align:right;padding:4px 2px;">${dept}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #f0f3f8;">
+                  <td style="color:#64748b;padding:4px 2px;">Commune</td>
+                  <td style="font-weight:600;text-align:right;padding:4px 2px;">${comm}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #f0f3f8;">
+                  <td style="color:#64748b;padding:4px 2px;">Population</td>
+                  <td style="font-weight:600;text-align:right;padding:4px 2px;">${pop}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #f0f3f8;">
+                  <td style="color:#64748b;padding:4px 2px;">Buildings</td>
+                  <td style="font-weight:600;text-align:right;padding:4px 2px;">${bldg}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #f0f3f8;">
+                  <td style="color:#64748b;padding:4px 2px;">LCOE</td>
+                  <td style="font-weight:600;text-align:right;padding:4px 2px;">${lcoe}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #f0f3f8;">
+                  <td style="color:#64748b;padding:4px 2px;">Total Investment</td>
+                  <td style="font-weight:600;text-align:right;padding:4px 2px;">${inv}</td>
+                </tr>
+                <tr>
+                  <td style="color:#64748b;padding:4px 2px;">New Connections</td>
+                  <td style="font-weight:600;text-align:right;padding:4px 2px;">${conn}</td>
+                </tr>
+              </table>
+              <div style="color:#9eaab8;font-size:.68rem;margin-top:8px;font-family:monospace;">
+                ${lat}°N  ${lon}°E
+              </div>
+            </div>`, { maxWidth: 280 }
+          );
+        }
+      }).addTo(layers.settlements);
+      const count = gj.features ? gj.features.length : 0;
+      document.getElementById('map-meta').textContent = `${count.toLocaleString()} settlements`;
+    }
+
+    // After loading, apply any active filter visually
+    const dept    = document.getElementById('filter-dept').value;
+    const commune = document.getElementById('filter-commune').value;
+    if (dept || commune) applyVisualFilter(dept, commune);
+
+  } catch(e) {
+    console.error('settlement load failed', e);
+  }
+  setLoader(false);
+}
+
+// ── Visual filter on settlement layer ─────────────────────────────────────────
+// settlementLayer is a L.GeoJSON (extends FeatureGroup); eachLayer iterates
+// individual feature layers — NOT the LayerGroup wrapper (layers.settlements).
+function applyVisualFilter(dept, commune) {
+  if (!settlementLayer) return;
+  settlementLayer.eachLayer(lyr => {
+    const props     = lyr.feature ? lyr.feature.properties : {};
+    const deptOK    = !dept    || (props.admin1_name || '') === dept;
+    const communeOK = !commune || (props.admin2_name || '') === commune;
+    const visible   = deptOK && communeOK;
+    if (visible) {
+      const tech = props.tech || '';
+      const col  = TECH_COL[tech] || (currentScenario === 'delta' ? CHANGE_COL : '#777');
+      const st   = TECH_STYLE[tech] || { dashArray: '3 3', weight: 1.5, fillOpacity: 0.15 };
+      lyr.setStyle({ opacity: .9, color: col,
+                     fillColor: col, fillOpacity: st.fillOpacity,
+                     weight: st.weight, dashArray: st.dashArray });
+    } else {
+      lyr.setStyle({ opacity: .04, fillOpacity: 0, color: '#aaa', weight: 1 });
+    }
+  });
+}
+
+// ── Stats / KPI ───────────────────────────────────────────────────────────────
+async function fetchStats(admin1, admin2) {
+  let url = '/api/stats';
+  if (admin1 || admin2) {
+    const p = new URLSearchParams();
+    if (admin1) p.set('admin1', admin1);
+    if (admin2) p.set('admin2', admin2);
+    url = `/api/stats/filtered?${p}`;
+  }
+  try {
+    statsData = await (await fetch(url)).json();
+    renderKPIs(currentScenario);
+    renderTechList(currentScenario);
+  } catch(e) { console.error('fetchStats failed', e); }
+}
+
+function fmt_m(v) {
+  if (v >= 1000) return `$${(v / 1000).toFixed(1)}B`;
+  return `$${v.toLocaleString()}M`;
+}
+
+function renderKPIs(sc) {
+  if (!statsData) return;
+  const s = statsData[sc] || {};
+  const d = statsData.delta || {};
+
+  document.getElementById('kv-n').textContent = statsData.n_settlements.toLocaleString();
+  document.getElementById('ks-n').textContent = statsData.filter?.admin1 || 'Benin national';
+  document.getElementById('kv-inv').textContent = s.investment_m_usd != null ? fmt_m(s.investment_m_usd) : '—';
+
+  const mix   = s.tech_mix || {};
+  const total = Object.values(mix).reduce((a, b) => a + b, 0);
+  const top   = Object.entries(mix).sort((a, b) => b[1] - a[1])[0];
+  if (top) {
+    document.getElementById('kv-dom').textContent = top[0].replace('_', ' ');
+    document.getElementById('ks-dom').textContent = total ? `${(top[1] / total * 100).toFixed(0)}% of settlements` : '';
+  }
+  document.getElementById('kv-chg').textContent = d.n_changed?.toLocaleString() || '—';
+  document.getElementById('scene-desc').textContent = SCENE_DESC[sc];
+}
+
+function renderTechList(sc) {
+  const el = document.getElementById('tech-list');
+  document.getElementById('tech-year').textContent = statsData ? `(${statsData.end_year})` : '';
+  if (!statsData || sc === 'delta') { el.innerHTML = ''; return; }
+  const mix   = statsData[sc]?.tech_mix || {};
+  const total = Object.values(mix).reduce((a, b) => a + b, 0);
+  el.innerHTML = Object.entries(mix).sort((a, b) => b[1] - a[1]).map(([tech, cnt]) => {
+    const pct = total ? (cnt / total * 100) : 0;
+    const col = TECH_COL[tech] || '#ccc';
+    return `<div class="tb-row">
+      <span class="tb-sw" style="background:${col}"></span>
+      <span class="tb-lbl">${tech.replace('_', ' ')}</span>
+      <div class="tb-trk"><div class="tb-fill" style="width:${pct}%;background:${col}"></div></div>
+      <span class="tb-pct">${pct.toFixed(1)}%</span>
+      <span class="tb-cnt">${cnt.toLocaleString()}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── Admin table ───────────────────────────────────────────────────────────────
+async function loadAdminData() {
+  try {
+    const data = await (await fetch('/api/admin')).json();
+    const depts = (data.departments || []).filter(d => d.department && d.department !== 'Unknown');
+
+    // Populate department dropdown
+    const sel = document.getElementById('filter-dept');
+    depts.map(d => d.department).sort().forEach(name => {
+      const o = document.createElement('option');
+      o.value = o.textContent = name;
+      sel.appendChild(o);
+    });
+
+    renderDeptTable(depts);
+  } catch(e) {
+    console.error('loadAdminData failed', e);
+    document.getElementById('dept-wrap').innerHTML = '<div style="color:var(--muted);font-size:.75rem;padding:4px 0;">Failed to load</div>';
+  }
+}
+
+function renderDeptTable(depts) {
+  if (!depts || !depts.length) {
+    document.getElementById('dept-wrap').innerHTML = '<div style="color:var(--muted);font-size:.75rem;">No data</div>';
+    return;
+  }
+  const rows = depts.map(d =>
+    `<tr onclick="zoomToDept('${d.department.replace(/'/g, "\\'")}')">
+      <td style="font-weight:600;">${d.department}</td>
+      <td style="text-align:right;">${d.n_settlements.toLocaleString()}</td>
+      <td style="text-align:right;">${d.pct_changed}%</td>
+      <td><span class="mini-bar" style="width:${Math.min(d.pct_changed * 0.4, 30)}px"></span></td>
+    </tr>`
+  ).join('');
+  document.getElementById('dept-wrap').innerHTML = `<table class="dept-tbl">
+    <thead><tr><th>Department</th><th>N</th><th>Changed</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function zoomToDept(dept) {
+  document.getElementById('filter-dept').value = dept;
+  applyFilter();
+}
+
+// ── Commune dropdown (populated from loaded settlement GeoJSON) ─────────────
+function populateCommunes(deptFilter) {
+  const sel = document.getElementById('filter-commune');
+  sel.innerHTML = '<option value="">All Communes</option>';
+
+  if (!deptFilter || !settlementGeoJSON) {
+    sel.style.display = 'none';
+    return;
+  }
+
+  const communes = new Set();
+  (settlementGeoJSON.features || []).forEach(f => {
+    const p = f.properties || {};
+    if ((!deptFilter || p.admin1_name === deptFilter) && p.admin2_name) {
+      communes.add(p.admin2_name);
+    }
+  });
+
+  if (communes.size > 0) {
+    [...communes].sort().forEach(c => {
+      const o = document.createElement('option');
+      o.value = o.textContent = c;
+      sel.appendChild(o);
+    });
+    sel.style.display = 'block';
+  } else {
+    sel.style.display = 'none';
+  }
+}
+
+async function applyFilter() {
+  const dept    = document.getElementById('filter-dept').value;
+  const commune = document.getElementById('filter-commune').value;
+
+  // Update filter active badge
+  const badge = document.getElementById('filter-badge');
+  badge.style.display = (dept || commune) ? 'inline-block' : 'none';
+
+  // Zoom map to department
+  if (dept) {
+    const bounds = deptBounds[normName(dept)];
+    if (bounds) map.flyToBounds(bounds, { padding: [30, 30], duration: 0.8 });
+  } else if (!commune) {
+    map.flyTo([9.3, 2.3], 7, { duration: 0.8 });
+  }
+
+  // Update commune dropdown if dept changed
+  if (!commune) populateCommunes(dept);
+
+  // Update stats KPIs
+  await fetchStats(dept, commune);
+
+  // Apply visual filter on settlement polygons
+  applyVisualFilter(dept, commune);
+}
+
+function clearFilter() {
+  document.getElementById('filter-dept').value    = '';
+  document.getElementById('filter-commune').value = '';
+  document.getElementById('filter-commune').style.display = 'none';
+  document.getElementById('filter-badge').style.display   = 'none';
+  map.flyTo([9.3, 2.3], 7, { duration: 0.8 });
+  fetchStats();
+  applyVisualFilter('', '');
+}
+
+// ── Layer toggles ─────────────────────────────────────────────────────────────
+function toggleLayer(name) {
+  const on = document.getElementById(`lyr-${name}`).checked;
+  if (on) map.addLayer(layers[name]);
+  else    map.removeLayer(layers[name]);
+}
+
+// ── Scenario switching ────────────────────────────────────────────────────────
+async function switchScenario(sc) {
+  currentScenario = sc;
+  ['vanilla', 'extended', 'delta'].forEach(s =>
+    document.getElementById(`btn-${s}`).classList.toggle('active', s === sc)
+  );
+  document.getElementById('map-label').textContent = MAP_LABELS[sc];
+  updateLegend(sc);
+  renderKPIs(sc);
+  renderTechList(sc);
+  await loadSettlements(sc);
+}
+
+// ── Lightbox ──────────────────────────────────────────────────────────────────
+function openFig(src) {
+  document.getElementById('lb-img').src = src;
+  document.getElementById('lightbox').classList.add('open');
+}
+function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async function init() {
+  // Static layers + stats + admin load in parallel (all fast, server-cached)
+  await Promise.all([loadBoundary(), loadHVLines()]);
+
+  const statsPromise  = fetchStats();
+  const adminPromise  = loadAdminData();
+  const settlePromise = loadSettlements('vanilla');
+
+  // Update legend after stats are ready so it can reflect loaded scenario
+  statsPromise.then(() => updateLegend('vanilla'));
+
+  await Promise.all([statsPromise, adminPromise, settlePromise]);
+})();
+</script>
+</body>
+</html>
